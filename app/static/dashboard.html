@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Reconciliation Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #38bdf8; text-align: center; margin-bottom: 2rem; }
+        .metrics { display: flex; gap: 1rem; margin-bottom: 2rem; }
+        .metric-card { background: #1e293b; padding: 1.5rem; border-radius: 0.5rem; flex: 1; text-align: center; border: 1px solid #334155; }
+        .metric-value { font-size: 2.5rem; font-weight: bold; color: #10b981; margin-top: 0.5rem; }
+        .logs-container { background: #1e293b; padding: 1rem; border-radius: 0.5rem; border: 1px solid #334155; margin-bottom: 2rem; }
+        .logs { height: 300px; overflow-y: auto; font-family: monospace; color: #cbd5e1; }
+        .log-entry { margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #334155; display: flex; gap: 1rem; }
+        .log-time { color: #94a3b8; }
+        .log-msg { flex: 1; }
+        .controls { display: flex; gap: 1rem; justify-content: center; }
+        button { background: #3b82f6; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 0.25rem; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚙️ Scalable Reconciliation Engine</h1>
+        
+        <div class="metrics">
+            <div class="metric-card">
+                <div>Total Batches Processed</div>
+                <div class="metric-value" id="batch-count">0</div>
+            </div>
+            <div class="metric-card">
+                <div>Total Records Reconciled</div>
+                <div class="metric-value" id="record-count">0</div>
+            </div>
+        </div>
+
+        <div class="logs-container">
+            <h3 style="margin-top: 0; margin-bottom: 1rem; color: #e2e8f0;">Live Event Stream (<span id="status">Connecting...</span>)</h3>
+            <div class="logs" id="logs"></div>
+        </div>
+        
+        <div class="controls">
+            <button onclick="simulateTraffic(500)">Generate 500 Pending Invoices</button>
+            <button onclick="simulateTraffic(3200)">Run 3,200 Benchmark</button>
+        </div>
+    </div>
+
+    <script>
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        
+        let ws;
+        let batchCount = 0;
+        let recordCount = 0;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                document.getElementById('status').innerText = 'Connected';
+                document.getElementById('status').style.color = '#10b981';
+            };
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'reconciliation_batch') {
+                    batchCount++;
+                    recordCount += data.count;
+                    document.getElementById('batch-count').innerText = batchCount;
+                    document.getElementById('record-count').innerText = recordCount;
+                    
+                    const logEl = document.getElementById('logs');
+                    const entry = document.createElement('div');
+                    entry.className = 'log-entry';
+                    
+                    const timeSpan = document.createElement('span');
+                    timeSpan.className = 'log-time';
+                    timeSpan.innerText = `[${new Date().toLocaleTimeString()}]`;
+                    
+                    const msgSpan = document.createElement('span');
+                    msgSpan.className = 'log-msg';
+                    msgSpan.innerText = `Successfully reconciled a batch of ${data.count} records. Using multi-turn agent protocol.`;
+                    
+                    entry.appendChild(timeSpan);
+                    entry.appendChild(msgSpan);
+                    
+                    logEl.prepend(entry);
+                }
+            };
+            ws.onclose = function() {
+                document.getElementById('status').innerText = 'Disconnected';
+                document.getElementById('status').style.color = '#ef4444';
+                setTimeout(connect, 1000);
+            };
+        }
+
+        async function simulateTraffic(count) {
+            // Send requests directly to graphql to generate pending invoices
+            const query = `
+                mutation CreateAuto {
+                    createInvoice(vendorName: "Auto Generated", amount: 100.0, referenceNumber: "AUTO-${Date.now()}-${Math.random()}") {
+                        id
+                    }
+                }
+            `;
+            // Execute multiple in parallel for speed
+            const promises = [];
+            for(let i = 0; i < count; i++) {
+                promises.push(
+                    fetch('/graphql', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query })
+                    })
+                );
+            }
+            // For a huge number like 3200, better to run chunks to avoid browser crash, but we'll try this simple script
+            const logEl = document.getElementById('logs');
+            logEl.prepend(Object.assign(document.createElement('div'), {
+                className: 'log-entry',
+                innerHTML: `<span class="log-time">[${new Date().toLocaleTimeString()}]</span><span class="log-msg" style="color:#eab308;">Triggered insertion of ${count} pending invoices for processing...</span>`
+            }));
+            
+            await Promise.all(promises);
+            console.log(`Finished queueing ${count} invoices.`);
+        }
+
+        connect();
+    </script>
+</body>
+</html>
